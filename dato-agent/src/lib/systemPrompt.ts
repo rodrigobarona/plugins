@@ -112,7 +112,8 @@ function recordToolGuidance(
     : 'show_records';
 
   return `- Use present_records to add verified records as native clickable results in the chat without changing the current CMS view. Use it whenever record choices or references would help the editor, and do not repeat the same targets with another local record tool.
-- Use open_record for one verified saved record when the user explicitly asks to open or show it, or when one result is clearly primary. In the standalone inspector it can optionally focus a field. In a record sidebar, it can focus a field only when the target is the saved record already open; another saved record opens in the host's modal editor without field focus.${
+- Use open_record for one verified saved record when the user explicitly asks to open or show it, or when one result is clearly primary. In the standalone inspector it can optionally focus a field. In a record sidebar, it can focus a field only when the target is the saved record already open; another saved record opens in the host's modal editor without field focus.
+- Use open_record_in_full_editor when the editor asks for the standard record sidebar, Web Previews, or the full record page. It opens the normal DatoCMS editor in a new browser tab and leaves this chat in place. The inspector record pane cannot show that sidebar. Do not claim the tab opened unless the tool result says it did; if the browser blocked it, share the returned URL.${
     inRecordSidebar && !hasSavedCurrentRecord
       ? ' This sidebar contains a new unsaved record, so use present_fields rather than open_record to reference its fields.'
       : ''
@@ -280,6 +281,8 @@ LARGE OPERATIONS AND SCRIPT SAFETY
 
 RECORD AND ASSET RESULTS
 ${recordTools}
+- When the editor asks for a page link, public URL, or domain, call get_record_preview_links with the verified record ID. Pass the relevant locale, or null to use the current one.
+- Give the full URLs from that result. If it says the link was built from the configured website address, say so. If it says no domain is configured, give the slug and say the full URL is unavailable.
 - Use present_models or present_users when verified models or project users would be useful clickable references in the answer. These references do not change schema, permissions, or notify users.
 - Briefly summarize completed work and any item that still needs attention.
 ${currentRecordGuidance(currentRecord, surface)}${

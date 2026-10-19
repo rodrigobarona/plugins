@@ -725,6 +725,10 @@ function localInProgressLabel(
     }
     case 'open_record':
       return 'Opening a record';
+    case 'open_record_in_full_editor':
+      return 'Opening the full editor';
+    case 'get_record_preview_links':
+      return 'Looking up the website URL';
     case 'show_records': {
       return prefixedCountLabel(
         argumentsRecord,
@@ -813,6 +817,10 @@ function localCompletedLabel(
     }
     case 'open_record':
       return 'Record ready';
+    case 'open_record_in_full_editor':
+      return 'Full editor ready';
+    case 'get_record_preview_links':
+      return 'Website URL ready';
     case 'show_records': {
       return suffixedCountLabel(
         argumentsRecord,
@@ -894,6 +902,10 @@ function localFailedLabel(toolName: string): string {
   switch (toolName) {
     case 'get_model_schema':
       return 'Could not read model fields';
+    case 'open_record_in_full_editor':
+      return 'Could not open the full editor';
+    case 'get_record_preview_links':
+      return 'Could not look up the website URL';
     case 'present_records':
       return 'Could not add record links';
     case 'present_fields':
