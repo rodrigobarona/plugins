@@ -64,21 +64,36 @@ const SENSITIVE_EXACT_KEYS = new Set([
 const SENSITIVE_KEY_SUFFIXES = [
   'accesstoken',
   'apikey',
+  'credential',
+  'credentials',
   'password',
+  'privatekey',
   'refreshtoken',
   'secret',
+  'token',
 ];
 
 const SENSITIVE_VALUE_PATTERNS: ReadonlyArray<[RegExp, string]> = [
   [/\bsk-[A-Za-z0-9_-]{16,}/g, REDACTED],
+  [/\bvck_[A-Za-z0-9_-]{8,}/g, REDACTED],
   [/\b(Bearer)\s+[A-Za-z0-9._~+/=-]{8,}/gi, `$1 ${REDACTED}`],
 ];
+
+function matchesSensitiveSuffix(normalized: string, suffix: string): boolean {
+  if (!normalized.endsWith(suffix)) {
+    return false;
+  }
+  // "token" must not redact settings such as maxOutputTokens.
+  return suffix !== 'token' || !normalized.endsWith('tokens');
+}
 
 function isSensitiveKey(key: string): boolean {
   const normalized = key.toLowerCase().replace(/[^a-z]/g, '');
   return (
     SENSITIVE_EXACT_KEYS.has(normalized) ||
-    SENSITIVE_KEY_SUFFIXES.some((suffix) => normalized.endsWith(suffix))
+    SENSITIVE_KEY_SUFFIXES.some((suffix) =>
+      matchesSensitiveSuffix(normalized, suffix),
+    )
   );
 }
 
@@ -163,12 +178,12 @@ function normalizeDiagnostics(value: unknown): JsonSafeValue {
       if (current instanceof Error) {
         const normalizedError: Record<string, JsonSafeValue> = {
           $type: 'Error',
-          name: current.name,
-          message: current.message,
+          name: redactSensitiveSubstrings(current.name),
+          message: redactSensitiveSubstrings(current.message),
         };
 
         if (current.stack !== undefined) {
-          normalizedError.stack = current.stack;
+          normalizedError.stack = redactSensitiveSubstrings(current.stack);
         }
 
         if ('cause' in current) {
@@ -250,9 +265,10 @@ function normalizeDiagnostics(value: unknown): JsonSafeValue {
       )) {
         const key = describeSymbol(symbolKey);
         try {
-          normalizedObject[key] = normalize(
+          normalizedObject[key] = normalizeProperty(
+            key,
             (current as Record<symbol, unknown>)[symbolKey],
-            propertyPath(path, key),
+            path,
           );
         } catch (error) {
           normalizedObject[key] = `[Unserializable: ${errorMessage(error)}]`;

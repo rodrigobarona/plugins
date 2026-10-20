@@ -1013,11 +1013,17 @@ function WebsiteLinksSection({
         return;
       }
 
-      onPreviewFrontendsChange(frontends);
+      onPreviewFrontendsChange(
+        frontends.map(({ name, apiEndpointUrl }) => ({
+          name,
+          apiEndpointUrl,
+          customHeaders: [],
+        })),
+      );
       const noun = frontends.length === 1 ? 'frontend' : 'frontends';
       const pronoun = frontends.length === 1 ? 'it' : 'them';
       setMessage(
-        `Imported ${frontends.length} ${noun}. Save settings to keep ${pronoun}.`,
+        `Imported ${frontends.length} ${noun}. Save settings to keep ${pronoun}. Preview endpoints that require custom headers are not supported.`,
       );
     } catch (cause) {
       setError(

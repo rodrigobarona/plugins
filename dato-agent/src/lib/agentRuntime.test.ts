@@ -4293,7 +4293,7 @@ describe('AgentRuntime', () => {
     const secret = 'sk-12345678901234567890';
     const client = new QueueResponsesClient([
       mcpFailureEvents({
-        message: `Bearer oauth-secret ${secret} ${'x'.repeat(2_000)}`,
+        message: `Bearer oauth-secret ${secret} vck_gatewaysecretvalue ${'x'.repeat(2_000)}`,
       }),
     ]);
     const runtime = runtimeWith(client);
@@ -4313,6 +4313,9 @@ describe('AgentRuntime', () => {
     expect(failedActivity?.activity.error).toContain('[redacted]');
     expect(failedActivity?.activity.error).not.toContain('oauth-secret');
     expect(failedActivity?.activity.error).not.toContain(secret);
+    expect(failedActivity?.activity.error).not.toContain(
+      'vck_gatewaysecretvalue',
+    );
   });
 
   it.each([

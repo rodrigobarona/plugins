@@ -498,6 +498,7 @@ export async function getRecordPreviewLinks(
     };
   }
 
+  const slug = item ? recordSlug(item, locale) : null;
   return {
     action: 'get_record_preview_links',
     itemId,
@@ -505,8 +506,24 @@ export async function getRecordPreviewLinks(
     source: 'unavailable',
     links: [],
     errors: fetched.errors,
-    slug: item ? recordSlug(item, locale) : null,
-    message:
-      'No website domain is configured. Give the editor the record slug and say the full URL is unavailable.',
+    slug,
+    message: unavailablePreviewMessage(host.websiteBaseUrl, item, slug),
   };
+}
+
+function unavailablePreviewMessage(
+  websiteBaseUrl: string,
+  item: Record<string, unknown> | null,
+  slug: string | null,
+): string {
+  if (!websiteBaseUrl) {
+    return 'No website domain is configured. Give the editor the record slug and say the full URL is unavailable.';
+  }
+  if (!item) {
+    return 'The record could not be read, so no URL could be built. Say the full URL is unavailable.';
+  }
+  if (!slug) {
+    return 'A website address is configured, but this record has no slug to build a URL from. Say the full URL is unavailable.';
+  }
+  return 'No preview endpoint returned a URL, and a website link could not be built. Say the full URL is unavailable.';
 }

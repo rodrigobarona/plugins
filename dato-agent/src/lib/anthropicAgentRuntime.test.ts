@@ -4692,4 +4692,65 @@ describe('Anthropic MCP authentication and access', () => {
       retryable: false,
     });
   });
+
+  it('keeps a large gateway attachment inside the request character budget', async () => {
+    const anthropic = new QueueAnthropicClient([
+      message('msg-large', [textBlock('Done.')]),
+    ]);
+    const runtime = runtimeWith(anthropic, mcpClientWith().client, {
+      provider: 'vercel',
+      model: 'openai/gpt-6.1-sol',
+    });
+    const imageBytes = 'x'.repeat(601_000);
+    const note = 'n'.repeat(150_000);
+
+    const { result } = await drain(
+      runtime.streamTurn({
+        message: 'Read this.',
+        attachments: [
+          attachment({
+            id: 'picture',
+            filename: 'diagram.png',
+            mimeType: 'image/png',
+            content: imageBytes,
+          }),
+          attachment({
+            id: 'notes',
+            filename: 'notes.txt',
+            mimeType: 'text/plain',
+            content: note,
+          }),
+        ],
+      }),
+    );
+
+    expect(result.status).toBe('completed');
+    const content = lastMessageContent(
+      anthropic.requests[0] as AgentAnthropicMessageCreateParamsStreaming,
+    );
+    const image = content.find(
+      (block): block is { source: { data: string } } =>
+        typeof block === 'object' &&
+        block !== null &&
+        'source' in block &&
+        typeof block.source === 'object' &&
+        block.source !== null &&
+        'data' in block.source &&
+        typeof block.source.data === 'string',
+    );
+    const attachedText = content.find(
+      (block): block is { text: string } =>
+        typeof block === 'object' &&
+        block !== null &&
+        'text' in block &&
+        typeof block.text === 'string' &&
+        block.text.startsWith('Attached file notes.txt:'),
+    );
+    expect(image?.source.data.length).toBeGreaterThan(600_000);
+    expect(attachedText?.text).toContain(
+      'The file is larger than the inline text limit.',
+    );
+    expect(attachedText?.text.length).toBeLessThan(110_000);
+    expect(attachedText?.text).not.toContain(note);
+  });
 });

@@ -82,6 +82,7 @@ export const MAX_MAX_CONTINUATIONS = 100;
 export const DEFAULT_MAX_TOOL_CALLS = 20;
 export const MAX_AGENT_TOOL_CALLS_PER_TURN = 200;
 export const MAX_AGENT_REQUEST_CHARACTERS = 600_000;
+const MAX_GATEWAY_INLINE_TEXT_CHARACTERS = 100_000;
 export const MAX_TOOL_RESULT_CHARACTERS = 60_000;
 export const DEFAULT_ANTHROPIC_MAX_OUTPUT_TOKENS = 16_000;
 export const DEEP_ANTHROPIC_MAX_OUTPUT_TOKENS = 64_000;
@@ -2562,7 +2563,8 @@ const SENSITIVE_SCHEMA_KEY =
 function redactSensitiveString(value: string): string {
   return value
     .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [redacted]')
-    .replace(/\bsk-[A-Za-z0-9_-]{12,}\b/g, '[redacted]');
+    .replace(/\bsk-[A-Za-z0-9_-]{12,}\b/g, '[redacted]')
+    .replace(/\bvck_[A-Za-z0-9_-]{8,}\b/g, '[redacted]');
 }
 
 function stringifyModelSchemaResult(result: unknown): string {
@@ -5578,9 +5580,42 @@ async function inlineGatewayAttachment(
     type: 'inline',
     block: {
       type: 'text',
-      text: `Attached file ${attachment.filename}:\n${new TextDecoder().decode(bytes)}`,
+      text: gatewayInlineText(attachment.filename, bytes),
     },
   };
+}
+
+function gatewayInlineText(filename: string, bytes: Uint8Array): string {
+  const decoded = new TextDecoder().decode(bytes);
+  const header = `Attached file ${filename}:\n`;
+  if (decoded.length <= MAX_GATEWAY_INLINE_TEXT_CHARACTERS) {
+    return `${header}${decoded}`;
+  }
+  return `${header}${decoded.slice(0, MAX_GATEWAY_INLINE_TEXT_CHARACTERS)}\n[Truncated. The file is larger than the inline text limit.]`;
+}
+
+function anthropicRequestCharacters(
+  messages: readonly MessageParam[],
+  system: string,
+  tools: readonly AnthropicTool[],
+): number {
+  const serializedMessages = JSON.stringify(messages, (key, value: unknown) => {
+    if (key === 'data' && typeof value === 'string') {
+      return '';
+    }
+    if (
+      key === 'text' &&
+      typeof value === 'string' &&
+      value.startsWith('Attached file ')
+    ) {
+      const lineBreak = value.indexOf('\n');
+      return lineBreak === -1 ? value : value.slice(0, lineBreak + 1);
+    }
+    return value;
+  });
+  return (
+    serializedMessages.length + system.length + JSON.stringify(tools).length
+  );
 }
 
 type AnthropicAttachmentTransportResult =
@@ -6409,9 +6444,7 @@ export class AnthropicAgentRuntime implements AgentRuntimeHandle {
   ): AgentAnthropicMessageCreateParamsStreaming {
     boundAnthropicToolResultHistory(state);
     if (
-      JSON.stringify(state.messages).length +
-        state.system.length +
-        JSON.stringify(tools).length >
+      anthropicRequestCharacters(state.messages, state.system, tools) >
       MAX_AGENT_REQUEST_CHARACTERS
     ) {
       throw new AgentContextLimitError(

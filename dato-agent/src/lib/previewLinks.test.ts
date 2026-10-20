@@ -309,4 +309,42 @@ describe('getRecordPreviewLinks', () => {
 
     fetchImpl.mockRestore();
   });
+
+  it('names the reason a website link is unavailable', async () => {
+    await expect(
+      getRecordPreviewLinks(
+        { ...host, websiteBaseUrl: '' },
+        { itemId: 'item-1' },
+      ),
+    ).resolves.toMatchObject({
+      source: 'unavailable',
+      message:
+        'No website domain is configured. Give the editor the record slug and say the full URL is unavailable.',
+    });
+
+    cmaMocks.rawFindItem.mockResolvedValueOnce({
+      data: {
+        id: 'item-1',
+        attributes: { title: 'Thanksgiving' },
+        relationships: { item_type: { data: { id: 'page' } } },
+      },
+    });
+    await expect(
+      getRecordPreviewLinks(host, { itemId: 'item-1' }),
+    ).resolves.toMatchObject({
+      source: 'unavailable',
+      slug: null,
+      message:
+        'A website address is configured, but this record has no slug to build a URL from. Say the full URL is unavailable.',
+    });
+
+    await expect(
+      getRecordPreviewLinks({ ...host, accessToken: '' }, { itemId: 'item-1' }),
+    ).resolves.toMatchObject({
+      source: 'unavailable',
+      slug: null,
+      message:
+        'The record could not be read, so no URL could be built. Say the full URL is unavailable.',
+    });
+  });
 });
