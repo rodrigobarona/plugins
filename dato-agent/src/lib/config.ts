@@ -6,7 +6,9 @@ import {
 
 export const DEFAULT_MODEL = 'gpt-5.6-terra';
 
-export const AGENT_PROVIDERS = ['openai', 'anthropic'] as const;
+export const DEFAULT_VERCEL_MODEL = 'anthropic/claude-sonnet-5.5';
+
+export const AGENT_PROVIDERS = ['openai', 'anthropic', 'vercel'] as const;
 
 export type AgentProvider = (typeof AGENT_PROVIDERS)[number];
 
@@ -52,6 +54,30 @@ export type AgentConfig = {
   anthropicModelMaxOutputTokens: number | null;
   anthropicReasoningEffort: AnthropicReasoningEffort;
   anthropicFastMode: boolean;
+  vercelApiKey: string;
+  /**
+   * Gateway model IDs use the `provider/model` form returned by
+   * `https://ai-gateway.vercel.sh/v1/models`.
+   */
+  vercelModel: string;
+  /**
+   * Maximum output-token capability reported by the gateway catalog for the
+   * selected model. Older saved configurations omit it and safely use the
+   * runtime fallback until an administrator next saves discovered metadata.
+   */
+  vercelModelMaxOutputTokens: number | null;
+  vercelReasoningEffort: ReasoningEffort;
+  /**
+   * Effort levels reported by the gateway catalog for `vercelModel`. An empty
+   * list means the selected model does not expose reasoning controls.
+   */
+  vercelModelReasoningEfforts: ReasoningEffort[];
+  vercelFastMode: boolean;
+  /**
+   * When false, the model picker shows only the curated recommended models.
+   * The full tool-capable catalog stays available behind this setting.
+   */
+  vercelShowAllModels: boolean;
   additionalInstructions: string;
   readOnly: boolean;
   enableRecordSidebar: boolean;
@@ -83,6 +109,13 @@ export const DEFAULT_CONFIG: AgentConfig = {
   anthropicModelMaxOutputTokens: null,
   anthropicReasoningEffort: 'high',
   anthropicFastMode: false,
+  vercelApiKey: '',
+  vercelModel: DEFAULT_VERCEL_MODEL,
+  vercelModelMaxOutputTokens: null,
+  vercelReasoningEffort: 'high',
+  vercelModelReasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+  vercelFastMode: false,
+  vercelShowAllModels: false,
   additionalInstructions: '',
   readOnly: false,
   enableRecordSidebar: true,
@@ -103,6 +136,27 @@ function positiveSafeInteger(value: unknown): number | null {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
     ? value
     : null;
+}
+
+function isReasoningEffort(value: unknown): value is ReasoningEffort {
+  return REASONING_EFFORTS.some((effort) => effort === value);
+}
+
+function normalizeReasoningEffortList(
+  value: unknown,
+): ReasoningEffort[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const supported = new Set<ReasoningEffort>();
+  for (const entry of value) {
+    if (isReasoningEffort(entry)) {
+      supported.add(entry);
+    }
+  }
+
+  return REASONING_EFFORTS.filter((effort) => supported.has(effort));
 }
 
 function normalizeRoleIds(value: unknown): string[] | null {
@@ -127,6 +181,13 @@ function normalizeProvider(value: unknown): AgentProvider {
   }
   if (candidate === 'openai' || candidate === 'chatgpt') {
     return 'openai';
+  }
+  if (
+    candidate === 'vercel' ||
+    candidate === 'ai-gateway' ||
+    candidate === 'vercel-ai-gateway'
+  ) {
+    return 'vercel';
   }
 
   return DEFAULT_CONFIG.provider;
@@ -157,6 +218,27 @@ export function normalizeConfig(parameters: unknown): AgentConfig {
     typeof source.anthropicFastMode === 'boolean'
       ? source.anthropicFastMode
       : DEFAULT_CONFIG.anthropicFastMode;
+  const vercelApiKey = trimmedString(source.vercelApiKey);
+  const vercelModel =
+    trimmedString(source.vercelModel) || DEFAULT_CONFIG.vercelModel;
+  const vercelModelMaxOutputTokens = positiveSafeInteger(
+    source.vercelModelMaxOutputTokens,
+  );
+  const vercelReasoningEffort =
+    REASONING_EFFORTS.find(
+      (effort) => effort === source.vercelReasoningEffort,
+    ) ?? DEFAULT_CONFIG.vercelReasoningEffort;
+  const vercelModelReasoningEfforts =
+    normalizeReasoningEffortList(source.vercelModelReasoningEfforts) ??
+    DEFAULT_CONFIG.vercelModelReasoningEfforts;
+  const vercelFastMode =
+    typeof source.vercelFastMode === 'boolean'
+      ? source.vercelFastMode
+      : DEFAULT_CONFIG.vercelFastMode;
+  const vercelShowAllModels =
+    typeof source.vercelShowAllModels === 'boolean'
+      ? source.vercelShowAllModels
+      : DEFAULT_CONFIG.vercelShowAllModels;
   const additionalInstructions =
     typeof source.additionalInstructions === 'string'
       ? source.additionalInstructions
@@ -184,6 +266,13 @@ export function normalizeConfig(parameters: unknown): AgentConfig {
     anthropicModelMaxOutputTokens,
     anthropicReasoningEffort,
     anthropicFastMode,
+    vercelApiKey,
+    vercelModel,
+    vercelModelMaxOutputTokens,
+    vercelReasoningEffort,
+    vercelModelReasoningEfforts,
+    vercelFastMode,
+    vercelShowAllModels,
     additionalInstructions,
     readOnly,
     enableRecordSidebar,
@@ -193,12 +282,20 @@ export function normalizeConfig(parameters: unknown): AgentConfig {
   };
 }
 
+function assertNeverProvider(provider: never): never {
+  throw new Error(`Unsupported agent provider: ${String(provider)}`);
+}
+
 export function providerLabel(provider: AgentProvider): string {
   switch (provider) {
     case 'openai':
       return 'OpenAI (ChatGPT)';
     case 'anthropic':
       return 'Anthropic (Claude)';
+    case 'vercel':
+      return 'Vercel AI Gateway';
+    default:
+      return assertNeverProvider(provider);
   }
 }
 
@@ -208,6 +305,10 @@ export function activeApiKey(config: AgentConfig): string {
       return config.openAiApiKey;
     case 'anthropic':
       return config.anthropicApiKey;
+    case 'vercel':
+      return config.vercelApiKey;
+    default:
+      return assertNeverProvider(config.provider);
   }
 }
 
@@ -217,6 +318,10 @@ export function activeModel(config: AgentConfig): string {
       return config.model;
     case 'anthropic':
       return config.anthropicModel;
+    case 'vercel':
+      return config.vercelModel;
+    default:
+      return assertNeverProvider(config.provider);
   }
 }
 
@@ -228,6 +333,10 @@ export function activeModelMaxOutputTokens(
       return undefined;
     case 'anthropic':
       return config.anthropicModelMaxOutputTokens ?? undefined;
+    case 'vercel':
+      return config.vercelModelMaxOutputTokens ?? undefined;
+    default:
+      return assertNeverProvider(config.provider);
   }
 }
 
@@ -237,6 +346,10 @@ export function activeReasoningEffort(config: AgentConfig): ReasoningEffort {
       return config.reasoningEffort;
     case 'anthropic':
       return config.anthropicReasoningEffort;
+    case 'vercel':
+      return config.vercelReasoningEffort;
+    default:
+      return assertNeverProvider(config.provider);
   }
 }
 
@@ -246,6 +359,10 @@ export function activeFastMode(config: AgentConfig): boolean {
       return config.openAiFastMode;
     case 'anthropic':
       return config.anthropicFastMode;
+    case 'vercel':
+      return config.vercelFastMode;
+    default:
+      return assertNeverProvider(config.provider);
   }
 }
 
@@ -258,6 +375,10 @@ export function withActiveApiKey(
       return { ...config, openAiApiKey: apiKey };
     case 'anthropic':
       return { ...config, anthropicApiKey: apiKey };
+    case 'vercel':
+      return { ...config, vercelApiKey: apiKey };
+    default:
+      return assertNeverProvider(config.provider);
   }
 }
 
@@ -265,6 +386,7 @@ export function withActiveModel(
   config: AgentConfig,
   model: string,
   maxOutputTokens?: number,
+  reasoningEfforts?: readonly ReasoningEffort[],
 ): AgentConfig {
   switch (config.provider) {
     case 'openai':
@@ -275,6 +397,20 @@ export function withActiveModel(
         anthropicModel: model,
         anthropicModelMaxOutputTokens: positiveSafeInteger(maxOutputTokens),
       };
+    case 'vercel':
+      return {
+        ...config,
+        vercelModel: model,
+        vercelModelMaxOutputTokens: positiveSafeInteger(maxOutputTokens),
+        ...(reasoningEfforts
+          ? {
+              vercelModelReasoningEfforts:
+                normalizeReasoningEffortList([...reasoningEfforts]) ?? [],
+            }
+          : {}),
+      };
+    default:
+      return assertNeverProvider(config.provider);
   }
 }
 
@@ -290,6 +426,10 @@ export function withActiveReasoningEffort(
         return config;
       }
       return { ...config, anthropicReasoningEffort: effort };
+    case 'vercel':
+      return { ...config, vercelReasoningEffort: effort };
+    default:
+      return assertNeverProvider(config.provider);
   }
 }
 
@@ -302,6 +442,10 @@ export function withActiveFastMode(
       return { ...config, openAiFastMode: fastMode };
     case 'anthropic':
       return { ...config, anthropicFastMode: fastMode };
+    case 'vercel':
+      return { ...config, vercelFastMode: fastMode };
+    default:
+      return assertNeverProvider(config.provider);
   }
 }
 

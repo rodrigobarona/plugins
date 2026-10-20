@@ -3574,6 +3574,10 @@ export default function AgentFrame(props: AgentFrameProps) {
       },
       model: activeModel(props.config),
       modelMaxOutputTokens: activeModelMaxOutputTokens(props.config),
+      modelReasoningEfforts:
+        props.config.provider === 'vercel'
+          ? props.config.vercelModelReasoningEfforts
+          : undefined,
       reasoningEffort: activeReasoningEffort(props.config),
       fastMode: activeFastMode(props.config),
       readOnly: props.config.readOnly,
@@ -4193,7 +4197,7 @@ export default function AgentFrame(props: AgentFrameProps) {
           );
       const injectHostContext = Boolean(
         hostContext &&
-          (turn.provider === 'anthropic' ||
+          (turn.provider !== 'openai' ||
             !previousResponseId ||
             conversationRef.current.hostContextFingerprint !==
               hostContext.fingerprint),
