@@ -28,7 +28,7 @@ afterEach(() => {
 });
 
 describe('serializeDiagnostics', () => {
-  it('produces deterministic pretty JSON while preserving raw diagnostic values', () => {
+  it('produces deterministic pretty JSON with credentials redacted', () => {
     const first = {
       token: 'dato_oauth_secret',
       schemaVersion: DIAGNOSTICS_SCHEMA_VERSION,
@@ -46,13 +46,93 @@ describe('serializeDiagnostics', () => {
     expect(serializeDiagnostics(first)).toBe(`{
   "arguments": {
     "a": false,
-    "apiKey": "sk-secret",
+    "apiKey": "[Redacted]",
     "z": true
   },
   "prompt": "Change record 178178740",
   "schemaVersion": 1,
-  "token": "dato_oauth_secret"
+  "token": "[Redacted]"
 }`);
+  });
+
+  it('redacts provider keys and OAuth credentials while keeping non-secret settings', () => {
+    const serialized = serializeDiagnostics({
+      configuration: {
+        anthropicApiKey: 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz',
+        openaiApiKey: '',
+        activeApiKey: 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz',
+        anthropicModelMaxOutputTokens: 128_000,
+        maxOutputTokens: 64_000,
+        sessionToken: 'session-secret-value',
+        privateKey: 'private-key-value',
+        credentials: 'credential-secret-value',
+        oauthCredentials: {
+          client: { clientId: 'client-123' },
+          token: {
+            accessToken: 'dato-access-token-value',
+            refreshToken: 'dato-refresh-token-value',
+            expiresAt: 1_800_000_000,
+          },
+          pending: { codeVerifier: 'pkce-verifier-value', state: 'abc' },
+        },
+      },
+      turn: { mcpAccessToken: 'dato-access-token-value' },
+      error: {
+        message:
+          'Request failed: Authorization: Bearer dato-access-token-value with key sk-proj-abcdefghijklmnopqrstuvwxyz',
+      },
+    });
+
+    expect(serialized).not.toContain('abcdefghijklmnopqrstuvwxyz');
+    expect(serialized).not.toContain('dato-access-token-value');
+    expect(serialized).not.toContain('dato-refresh-token-value');
+    expect(serialized).not.toContain('pkce-verifier-value');
+    expect(serialized).not.toContain('session-secret-value');
+    expect(serialized).not.toContain('private-key-value');
+    expect(serialized).not.toContain('credential-secret-value');
+    expect(JSON.parse(serialized)).toMatchObject({
+      configuration: {
+        anthropicApiKey: '[Redacted]',
+        openaiApiKey: '',
+        activeApiKey: '[Redacted]',
+        anthropicModelMaxOutputTokens: 128_000,
+        maxOutputTokens: 64_000,
+        sessionToken: '[Redacted]',
+        privateKey: '[Redacted]',
+        credentials: '[Redacted]',
+        oauthCredentials: {
+          client: { clientId: 'client-123' },
+          token: {
+            accessToken: '[Redacted]',
+            refreshToken: '[Redacted]',
+            expiresAt: 1_800_000_000,
+          },
+          pending: { codeVerifier: '[Redacted]', state: 'abc' },
+        },
+      },
+      error: {
+        message:
+          'Request failed: Authorization: Bearer [Redacted] with key [Redacted]',
+      },
+    });
+  });
+
+  it('redacts secrets carried on a real Error', () => {
+    const error = new Error(
+      'Request failed: Authorization: Bearer dato-access-token-value',
+    );
+    error.name = 'Bearer dato-access-token-value';
+    error.stack =
+      'Error: Authorization: Bearer dato-access-token-value\n    at request';
+
+    const serialized = serializeDiagnostics(error);
+
+    expect(serialized).not.toContain('dato-access-token-value');
+    expect(JSON.parse(serialized)).toMatchObject({
+      name: 'Bearer [Redacted]',
+      message: 'Request failed: Authorization: Bearer [Redacted]',
+      stack: 'Error: Authorization: Bearer [Redacted]\n    at request',
+    });
   });
 
   it('handles errors, BigInt, Map, Set, circular references, and unsupported values', () => {

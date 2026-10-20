@@ -26,6 +26,7 @@ import {
   createAgentRuntime,
   type FieldReferenceInput,
   type GetModelSchemaCallback,
+  type GetRecordPreviewLinksCallback,
   MAX_AGENT_ATTACHMENT_TOTAL_BYTES,
   MAX_AGENT_ATTACHMENTS_PER_MESSAGE,
   MAX_AGENT_ATTACHMENTS_PER_REQUEST,
@@ -170,6 +171,7 @@ export type AgentFrameProps = {
     | undefined
     | Promise<AgentHostContextSnapshot | undefined>;
   getModelSchema?: GetModelSchemaCallback;
+  getRecordPreviewLinks?: GetRecordPreviewLinksCallback;
   /**
    * Sidebar-only verifier for field receipts. It must resolve against the
    * latest current-model schema before a receipt is shown.
@@ -3572,12 +3574,17 @@ export default function AgentFrame(props: AgentFrameProps) {
       },
       model: activeModel(props.config),
       modelMaxOutputTokens: activeModelMaxOutputTokens(props.config),
+      modelReasoningEfforts:
+        props.config.provider === 'vercel'
+          ? props.config.vercelModelReasoningEfforts
+          : undefined,
       reasoningEffort: activeReasoningEffort(props.config),
       fastMode: activeFastMode(props.config),
       readOnly: props.config.readOnly,
       additionalInstructions: props.config.additionalInstructions,
       hostContext,
       getModelSchema: props.getModelSchema,
+      getRecordPreviewLinks: props.getRecordPreviewLinks,
       ...(!readOnlyRef.current && createDatoAsset ? { createDatoAsset } : {}),
       context: runtimeSystemContext(),
       navigation: {
@@ -3594,6 +3601,18 @@ export default function AgentFrame(props: AgentFrameProps) {
           const target = { itemId, itemTypeId, fieldPath };
           await appendRecordResults('Record found', [target]);
           return queuePendingNavigation({ type: 'openRecord', target });
+        },
+        openRecordInFullEditor: async ({ itemId, itemTypeId }) => {
+          const target = { itemId, itemTypeId };
+          const result = await props.navigator.openRecordInFullEditor(target);
+          await appendRecordResults('Record found', [target]);
+          return {
+            opened: result.opened,
+            url: result.url,
+            message: result.opened
+              ? 'The full record editor was opened in a new browser tab, including the standard sidebar.'
+              : `The browser blocked the new tab. Share this URL so the editor can open it: ${result.url}`,
+          };
         },
         showRecords: async ({ title, records }) => {
           await appendRecordResults(title, records);
@@ -4178,7 +4197,7 @@ export default function AgentFrame(props: AgentFrameProps) {
           );
       const injectHostContext = Boolean(
         hostContext &&
-          (turn.provider === 'anthropic' ||
+          (turn.provider !== 'openai' ||
             !previousResponseId ||
             conversationRef.current.hostContextFingerprint !==
               hostContext.fingerprint),
@@ -6114,6 +6133,13 @@ export default function AgentFrame(props: AgentFrameProps) {
       onOpenAsset={openAsset}
       onOpenField={props.openCurrentField ? openField : undefined}
       onOpenRecord={openRecord}
+      onOpenRecordInFullEditor={async (record) => {
+        await props.navigator.openRecordInFullEditor({
+          itemId: record.itemId,
+          itemTypeId: record.itemTypeId,
+          label: record.title,
+        });
+      }}
       currentRecordId={
         surface === 'project' ? currentInspectorRecordId : undefined
       }

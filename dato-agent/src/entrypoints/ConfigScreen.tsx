@@ -38,6 +38,10 @@ import {
 } from '../lib/config';
 import { ACCOUNT_ROLE_ID } from '../lib/permissions';
 import {
+  loadWebPreviewFrontends,
+  type PreviewFrontend,
+} from '../lib/previewLinks';
+import {
   listProviderModels,
   type ProviderModel,
   preferredProviderModel,
@@ -62,6 +66,11 @@ type ReasoningOption = {
 type ModelOption = {
   label: string;
   value: string;
+};
+
+type ModelOptionGroup = {
+  label?: string;
+  options: ModelOption[];
 };
 
 type RoleOption = {
@@ -95,6 +104,7 @@ const MODEL_DISCOVERY_DELAY_MS = 500;
 const PROVIDER_OPTIONS: ProviderOption[] = [
   { label: providerLabel('openai'), value: 'openai' },
   { label: providerLabel('anthropic'), value: 'anthropic' },
+  { label: providerLabel('vercel'), value: 'vercel' },
 ];
 
 const PROVIDER_DETAILS: Record<
@@ -118,6 +128,12 @@ const PROVIDER_DETAILS: Record<
     apiKeyPlaceholder: 'sk-ant-…',
     modelLabel: 'Claude model',
   },
+  vercel: {
+    name: 'Vercel AI Gateway',
+    apiKeyLabel: 'AI Gateway API key',
+    apiKeyPlaceholder: 'vck_…',
+    modelLabel: 'Model',
+  },
 };
 
 const REASONING_OPTIONS: ReasoningOption[] = [
@@ -133,18 +149,62 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unknown error';
 }
 
-function modelOptions(
+function toModelOption(model: ProviderModel): ModelOption {
+  return { label: model.label, value: model.id };
+}
+
+function modelSelectGroups(
+  config: AgentConfig,
   models: readonly ProviderModel[],
   currentModel: string,
-): ModelOption[] {
-  if (models.length === 0) {
-    return currentModel ? [{ label: currentModel, value: currentModel }] : [];
+): ModelOptionGroup[] {
+  if (config.provider !== 'vercel') {
+    return [
+      {
+        options:
+          models.length > 0
+            ? models.map(toModelOption)
+            : currentModel
+              ? [{ label: currentModel, value: currentModel }]
+              : [],
+      },
+    ];
   }
 
-  return models.map((model) => ({
-    label: model.label,
-    value: model.id,
-  }));
+  const recommended = models.filter((model) => model.recommended);
+  const others = models.filter((model) => !model.recommended);
+  const groups: ModelOptionGroup[] = [];
+  if (recommended.length > 0) {
+    groups.push({
+      label: 'Recommended',
+      options: recommended.map(toModelOption),
+    });
+  }
+  if (config.vercelShowAllModels && others.length > 0) {
+    groups.push({
+      label: 'All tool-capable models',
+      options: others.map(toModelOption),
+    });
+  }
+
+  const visibleIds = new Set(
+    groups.flatMap((group) => group.options.map((option) => option.value)),
+  );
+  if (currentModel && !visibleIds.has(currentModel)) {
+    const current = models.find((model) => model.id === currentModel);
+    groups.push({
+      label: 'Current model',
+      options: [{ label: current?.label ?? currentModel, value: currentModel }],
+    });
+  }
+
+  return groups.length > 0 ? groups : [{ options: [] }];
+}
+
+function flattenModelOptions(
+  groups: readonly ModelOptionGroup[],
+): ModelOption[] {
+  return groups.flatMap((group) => [...group.options]);
 }
 
 function configFingerprint(config: AgentConfig): string {
@@ -152,24 +212,40 @@ function configFingerprint(config: AgentConfig): string {
 }
 
 function providerConfigurationFingerprint(config: AgentConfig): string {
-  return JSON.stringify(
-    config.provider === 'openai'
-      ? {
-          provider: config.provider,
-          apiKey: config.openAiApiKey,
-          model: config.model,
-          reasoningEffort: config.reasoningEffort,
-          fastMode: config.openAiFastMode,
-        }
-      : {
-          provider: config.provider,
-          apiKey: config.anthropicApiKey,
-          model: config.anthropicModel,
-          modelMaxOutputTokens: config.anthropicModelMaxOutputTokens,
-          reasoningEffort: config.anthropicReasoningEffort,
-          fastMode: config.anthropicFastMode,
-        },
-  );
+  switch (config.provider) {
+    case 'openai':
+      return JSON.stringify({
+        provider: config.provider,
+        apiKey: config.openAiApiKey,
+        model: config.model,
+        reasoningEffort: config.reasoningEffort,
+        fastMode: config.openAiFastMode,
+      });
+    case 'anthropic':
+      return JSON.stringify({
+        provider: config.provider,
+        apiKey: config.anthropicApiKey,
+        model: config.anthropicModel,
+        modelMaxOutputTokens: config.anthropicModelMaxOutputTokens,
+        reasoningEffort: config.anthropicReasoningEffort,
+        fastMode: config.anthropicFastMode,
+      });
+    case 'vercel':
+      return JSON.stringify({
+        provider: config.provider,
+        apiKey: config.vercelApiKey,
+        model: config.vercelModel,
+        modelMaxOutputTokens: config.vercelModelMaxOutputTokens,
+        modelReasoningEfforts: config.vercelModelReasoningEfforts,
+        reasoningEffort: config.vercelReasoningEffort,
+        fastMode: config.vercelFastMode,
+        showAllModels: config.vercelShowAllModels,
+      });
+    default: {
+      const unreachable: never = config.provider;
+      return unreachable;
+    }
+  }
 }
 
 function discoveryRequestKey(
@@ -475,11 +551,15 @@ function modelDiscoveryHint(
     return 'Waiting to load models…';
   }
   const count = discovery.models.length;
+  const summary =
+    provider === 'vercel'
+      ? `${discovery.models.filter((model) => model.recommended).length} recommended models, ${count} tool-capable model${count === 1 ? '' : 's'} available.`
+      : count === 0
+        ? 'No compatible agent models are available for this API key.'
+        : `${count} compatible model${count === 1 ? '' : 's'} available.`;
   return (
     <>
-      {count === 0
-        ? 'No compatible agent models are available for this API key.'
-        : `${count} compatible model${count === 1 ? '' : 's'} available.`}{' '}
+      {summary}{' '}
       <Button
         buttonSize="xxs"
         disabled={refreshDisabled}
@@ -518,7 +598,10 @@ function configurationValidationError(
   if (!selectedModel) {
     return `Choose a model returned by ${details.name} for this API key.`;
   }
-  if (!selectedModel.reasoningEfforts.includes(activeReasoningEffort(config))) {
+  if (
+    selectedModel.reasoningEfforts.length > 0 &&
+    !selectedModel.reasoningEfforts.includes(activeReasoningEffort(config))
+  ) {
     return `Choose a reasoning effort supported by the selected ${details.name} model.`;
   }
 
@@ -549,23 +632,35 @@ function modelFieldError(
   return undefined;
 }
 
+function fallbackReasoningEfforts(config: AgentConfig): ReasoningEffort[] {
+  switch (config.provider) {
+    case 'openai':
+      return REASONING_OPTIONS.map((option) => option.value);
+    case 'anthropic':
+      return REASONING_OPTIONS.flatMap((option) =>
+        option.value === 'none' ? [] : [option.value],
+      );
+    case 'vercel':
+      return config.vercelModelReasoningEfforts;
+    default: {
+      const unreachable: never = config.provider;
+      return unreachable;
+    }
+  }
+}
+
 function reasoningOptions(
-  provider: AgentProvider,
+  config: AgentConfig,
   selectedModel: ProviderModel | undefined,
 ): ReasoningOption[] {
   const recommendedEffort: ReasoningEffort =
-    provider === 'openai' ? 'medium' : 'high';
+    config.provider === 'openai' ? 'medium' : 'high';
   const supportedEfforts =
-    selectedModel?.reasoningEfforts ??
-    (provider === 'openai'
-      ? REASONING_OPTIONS.map((option) => option.value)
-      : REASONING_OPTIONS.flatMap((option) =>
-          option.value === 'none' ? [] : [option.value],
-        ));
+    selectedModel?.reasoningEfforts ?? fallbackReasoningEfforts(config);
 
   return REASONING_OPTIONS.filter(
     (option) =>
-      (provider === 'openai' || option.value !== 'none') &&
+      (config.provider !== 'anthropic' || option.value !== 'none') &&
       supportedEfforts.includes(option.value),
   ).map((option) =>
     option.value === recommendedEffort
@@ -575,10 +670,17 @@ function reasoningOptions(
 }
 
 function preferredReasoningEffort(
+  provider: AgentProvider,
   options: readonly ReasoningOption[],
 ): ReasoningEffort | undefined {
+  const high = options.find((option) => option.value === 'high')?.value;
+  if (high) {
+    return high;
+  }
+  if (provider === 'vercel') {
+    return options.at(-1)?.value;
+  }
   return (
-    options.find((option) => option.value === 'high')?.value ??
     options.find((option) => option.value === 'medium')?.value ??
     options[0]?.value
   );
@@ -592,14 +694,17 @@ function configWithSelectedModel(
     config,
     selectedModel.id,
     selectedModel.maxOutputTokens,
+    config.provider === 'vercel' ? selectedModel.reasoningEfforts : undefined,
   );
   if (
     activeFastMode(withModel) &&
-    !providerModelSupportsFastMode(config.provider, selectedModel.id)
+    !providerModelSupportsFastMode(config.provider, selectedModel.id, [
+      selectedModel,
+    ])
   ) {
     withModel = withActiveFastMode(withModel, false);
   }
-  const availableOptions = reasoningOptions(config.provider, selectedModel);
+  const availableOptions = reasoningOptions(config, selectedModel);
   if (
     availableOptions.some(
       (option) => option.value === activeReasoningEffort(withModel),
@@ -608,14 +713,14 @@ function configWithSelectedModel(
     return withModel;
   }
 
-  const fallback = preferredReasoningEffort(availableOptions);
+  const fallback = preferredReasoningEffort(config.provider, availableOptions);
   return fallback ? withActiveReasoningEffort(withModel, fallback) : withModel;
 }
 
 type ProviderConfigurationFieldsProps = {
   apiKey: string;
   attemptedSave: boolean;
-  availableModelOptions: ModelOption[];
+  availableModelGroups: ModelOptionGroup[];
   availableReasoningOptions: ReasoningOption[];
   canEditSchema: boolean;
   config: AgentConfig;
@@ -630,10 +735,53 @@ type ProviderConfigurationFieldsProps = {
   setConfig: Dispatch<SetStateAction<AgentConfig>>;
 };
 
+function reasoningEffortHint(
+  config: AgentConfig,
+  selectedModel: ProviderModel | undefined,
+): string {
+  switch (config.provider) {
+    case 'anthropic':
+      return 'Options supported by the selected Claude model.';
+    case 'vercel':
+      return selectedModel && selectedModel.reasoningEfforts.length === 0
+        ? 'This model does not expose reasoning controls.'
+        : 'Options reported by the Vercel AI Gateway catalog for this model.';
+    case 'openai':
+      return 'Availability depends on the selected model.';
+    default: {
+      const unreachable: never = config.provider;
+      return unreachable;
+    }
+  }
+}
+
+function fastModeHintFor(
+  provider: AgentProvider,
+  fastModeSupported: boolean,
+): string {
+  if (fastModeSupported) {
+    return provider === 'vercel'
+      ? 'Switches this model to its faster gateway variant. That variant costs more per token.'
+      : 'Uses premium processing for every model request, including tool steps, and can significantly increase API costs.';
+  }
+  switch (provider) {
+    case 'anthropic':
+      return 'Not available for this Claude model. Anthropic Fast mode currently requires a supported Opus model and preview access.';
+    case 'vercel':
+      return 'Not available for this model. The gateway catalog has no faster variant.';
+    case 'openai':
+      return 'Not available for the selected OpenAI model.';
+    default: {
+      const unreachable: never = provider;
+      return unreachable;
+    }
+  }
+}
+
 function ProviderConfigurationFields({
   apiKey,
   attemptedSave,
-  availableModelOptions,
+  availableModelGroups,
   availableReasoningOptions,
   canEditSchema,
   config,
@@ -650,8 +798,13 @@ function ProviderConfigurationFields({
   const details = PROVIDER_DETAILS[config.provider];
   const fastMode = activeFastMode(config);
   const fastModeSupported = selectedModel
-    ? providerModelSupportsFastMode(config.provider, selectedModel.id)
+    ? providerModelSupportsFastMode(config.provider, selectedModel.id, [
+        selectedModel,
+      ])
     : false;
+  const modelOptions = flattenModelOptions(availableModelGroups);
+  const reasoningHint = reasoningEffortHint(config, selectedModel);
+  const fastModeHint = fastModeHintFor(config.provider, fastModeSupported);
 
   return (
     <Section title="AI provider">
@@ -691,7 +844,11 @@ function ProviderConfigurationFields({
               ? `${details.apiKeyLabel} is required.`
               : undefined
           }
-          hint="Shared across this project. Each editor connects DatoCMS separately in the agent."
+          hint={
+            config.provider === 'vercel'
+              ? 'Create this key under Vercel → AI Gateway → API keys. Requests are billed to the team’s AI Gateway credits, or to bring-your-own provider keys configured there.'
+              : 'Shared across this project. Each editor connects DatoCMS separately in the agent.'
+          }
           onChange={(value) =>
             setConfig((current) => withActiveApiKey(current, value))
           }
@@ -704,15 +861,12 @@ function ProviderConfigurationFields({
             type: 'password',
           }}
         />
-        <SelectField<ModelOption, false, never>
+        <SelectField<ModelOption, false, ModelOptionGroup>
           id="model"
           name="model"
           label={details.modelLabel}
           required
-          value={
-            availableModelOptions.find((option) => option.value === model) ??
-            null
-          }
+          value={modelOptions.find((option) => option.value === model) ?? null}
           error={modelFieldError(attemptedSave, config, discovery)}
           hint={modelDiscoveryHint(
             config.provider,
@@ -734,12 +888,33 @@ function ProviderConfigurationFields({
             }
           }}
           selectInputProps={{
-            options: availableModelOptions,
+            options: availableModelGroups,
             isDisabled: modelSelectDisabled,
             isLoading: discovery.loading,
             required: true,
           }}
         />
+        {config.provider === 'vercel' && (
+          <SwitchField
+            id="vercel-show-all-models"
+            name="vercel-show-all-models"
+            label="Show all tool-capable models"
+            hint="Recommended models are the closest fit for editing DatoCMS content. The full list is every gateway language model that can call tools."
+            value={config.vercelShowAllModels}
+            onChange={(value) =>
+              setConfig((current) =>
+                current.provider === 'vercel'
+                  ? { ...current, vercelShowAllModels: value }
+                  : current,
+              )
+            }
+            switchInputProps={{
+              name: 'vercel-show-all-models',
+              value: config.vercelShowAllModels,
+              disabled: !canEditSchema || saving,
+            }}
+          />
+        )}
         <SelectField<ReasoningOption, false, never>
           id="reasoning-effort"
           name="reasoning-effort"
@@ -758,16 +933,13 @@ function ProviderConfigurationFields({
               );
             }
           }}
-          hint={
-            config.provider === 'anthropic'
-              ? 'Options supported by the selected Claude model.'
-              : 'Availability depends on the selected model.'
-          }
+          hint={reasoningHint}
           selectInputProps={{
             options: availableReasoningOptions,
             isDisabled:
               !canEditSchema ||
               saving ||
+              availableReasoningOptions.length === 0 ||
               (config.provider === 'anthropic' && !selectedModel),
           }}
         />
@@ -775,13 +947,7 @@ function ProviderConfigurationFields({
           id="fast-mode"
           name="fast-mode"
           label="Fast mode"
-          hint={
-            fastModeSupported
-              ? 'Uses premium processing for every model request, including tool steps, and can significantly increase API costs.'
-              : config.provider === 'anthropic'
-                ? 'Not available for this Claude model. Anthropic Fast mode currently requires a supported Opus model and preview access.'
-                : 'Not available for the selected OpenAI model.'
-          }
+          hint={fastModeHint}
           value={fastMode}
           onChange={(value) =>
             setConfig((current) => withActiveFastMode(current, value))
@@ -792,6 +958,117 @@ function ProviderConfigurationFields({
             disabled: !canEditSchema || saving || !fastModeSupported,
           }}
         />
+      </FieldGroup>
+    </Section>
+  );
+}
+
+function WebsiteLinksSection({
+  accessToken,
+  baseUrl,
+  canEdit,
+  environment,
+  onPreviewFrontendsChange,
+  onWebsiteBaseUrlChange,
+  previewFrontends,
+  saving,
+  websiteBaseUrl,
+}: {
+  accessToken: string | null | undefined;
+  baseUrl: string;
+  canEdit: boolean;
+  environment: string;
+  onPreviewFrontendsChange: (frontends: PreviewFrontend[]) => void;
+  onWebsiteBaseUrlChange: (value: string) => void;
+  previewFrontends: readonly PreviewFrontend[];
+  saving: boolean;
+  websiteBaseUrl: string;
+}) {
+  const [importing, setImporting] = useState(false);
+  const [error, setError] = useState<string>();
+  const [message, setMessage] = useState<string>();
+
+  const importFrontends = async () => {
+    if (!accessToken) {
+      setError('The current user access token is unavailable.');
+      setMessage(undefined);
+      return;
+    }
+
+    setImporting(true);
+    setError(undefined);
+    setMessage(undefined);
+    try {
+      const frontends = await loadWebPreviewFrontends(
+        buildClient({
+          apiToken: accessToken,
+          environment,
+          baseUrl,
+        }),
+      );
+      if (frontends.length === 0) {
+        setError(
+          'Web Previews is not installed, or none of its frontends have a preview link endpoint.',
+        );
+        return;
+      }
+
+      onPreviewFrontendsChange(
+        frontends.map(({ name, apiEndpointUrl }) => ({
+          name,
+          apiEndpointUrl,
+          customHeaders: [],
+        })),
+      );
+      const noun = frontends.length === 1 ? 'frontend' : 'frontends';
+      const pronoun = frontends.length === 1 ? 'it' : 'them';
+      setMessage(
+        `Imported ${frontends.length} ${noun}. Save settings to keep ${pronoun}. Preview endpoints that require custom headers are not supported.`,
+      );
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : 'Could not read the Web Previews settings.',
+      );
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  return (
+    <Section title="Website links">
+      <FieldGroup>
+        <TextField
+          id="website-base-url"
+          name="website-base-url"
+          label="Website address"
+          value={websiteBaseUrl}
+          placeholder="https://www.example.com"
+          hint="Used only when Web Previews does not return a link. The agent adds the record slug to this address."
+          onChange={onWebsiteBaseUrlChange}
+          textInputProps={{
+            disabled: !canEdit || saving,
+          }}
+        />
+        <Button
+          type="button"
+          buttonType="muted"
+          disabled={!canEdit || saving || importing}
+          onClick={() => {
+            void importFrontends();
+          }}
+        >
+          {importing ? 'Importing…' : 'Import from Web Previews'}
+        </Button>
+        {previewFrontends.length > 0 && (
+          <p>
+            Saved preview endpoints:{' '}
+            {previewFrontends.map((frontend) => frontend.name).join(', ')}.
+          </p>
+        )}
+        {message && <p>{message}</p>}
+        {error && <p role="alert">{error}</p>}
       </FieldGroup>
     </Section>
   );
@@ -895,10 +1172,7 @@ export default function ConfigScreen({ ctx }: Props) {
   const selectedModel = modelDiscovery.models.find(
     (candidate) => candidate.id === model,
   );
-  const availableReasoningOptions = reasoningOptions(
-    config.provider,
-    selectedModel,
-  );
+  const availableReasoningOptions = reasoningOptions(config, selectedModel);
   const reasoningEffort = activeReasoningEffort(config);
 
   useEffect(() => {
@@ -921,9 +1195,9 @@ export default function ConfigScreen({ ctx }: Props) {
     });
   }, [config.provider, selectedModel]);
 
-  const availableModelOptions = useMemo(
-    () => modelOptions(modelDiscovery.models, model),
-    [model, modelDiscovery.models],
+  const availableModelGroups = useMemo(
+    () => modelSelectGroups(config, modelDiscovery.models, model),
+    [config, model, modelDiscovery.models],
   );
   const modelSelectDisabled =
     !canEditSchema ||
@@ -1021,7 +1295,7 @@ export default function ConfigScreen({ ctx }: Props) {
           <ProviderConfigurationFields
             apiKey={apiKey}
             attemptedSave={attemptedSave}
-            availableModelOptions={availableModelOptions}
+            availableModelGroups={availableModelGroups}
             availableReasoningOptions={availableReasoningOptions}
             canEditSchema={canEditSchema}
             config={config}
@@ -1053,6 +1327,20 @@ export default function ConfigScreen({ ctx }: Props) {
               />
             </FieldGroup>
           </Section>
+
+          <WebsiteLinksSection
+            accessToken={ctx.currentUserAccessToken}
+            baseUrl={ctx.cmaBaseUrl}
+            canEdit={canEditSchema}
+            environment={ctx.environment}
+            onPreviewFrontendsChange={(frontends) =>
+              update('previewFrontends', frontends)
+            }
+            onWebsiteBaseUrlChange={(value) => update('websiteBaseUrl', value)}
+            previewFrontends={config.previewFrontends}
+            saving={saving}
+            websiteBaseUrl={config.websiteBaseUrl}
+          />
 
           <Section title="Permissions">
             <FieldGroup>

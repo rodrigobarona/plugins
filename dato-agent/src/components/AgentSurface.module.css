@@ -485,7 +485,7 @@
 
 .transcriptInner {
   box-sizing: border-box;
-  width: 100%;
+  width: min(100%, 760px);
   min-height: 100%;
   margin: 0 auto;
   padding: 14px 14px 18px;
@@ -1125,7 +1125,7 @@
 
 .composerInner {
   box-sizing: border-box;
-  width: 100%;
+  width: min(100%, 760px);
   margin: 0 auto;
   padding: 10px 14px 12px;
 }
@@ -1182,6 +1182,43 @@
 .mentionReceiptItem > :first-child {
   min-width: 0;
   flex: 1 1 auto;
+}
+
+.mentionReceiptItems .recordExternalLink {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  place-items: center;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 4px;
+  color: var(--color--ink-subtle);
+  background: transparent;
+  cursor: pointer;
+}
+
+.mentionReceiptItems .recordExternalLink svg {
+  width: 12px;
+  height: 12px;
+}
+
+.mentionReceiptItems .recordExternalLink:hover,
+.mentionReceiptItems .recordExternalLink:focus-visible {
+  color: var(--color--ink);
+  background: var(--color--surface-hover);
+}
+
+.mentionReceiptItems .recordExternalLink:focus-visible {
+  outline: 2px solid var(--color--focus--outline);
+  outline-offset: 1px;
+}
+
+.mentionReceiptItems .recordExternalLink:disabled {
+  color: var(--color--disabled--ink);
+  cursor: default;
+  background: transparent;
 }
 
 .mentionReceiptState {
