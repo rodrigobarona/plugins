@@ -76,6 +76,8 @@ type TipTapComposerProps = {
   placeholder?: string;
   ariaLabel?: string;
   maxLength?: number;
+  /** Return true to take over a plain-text paste instead of inserting it. */
+  onLargePaste?: (text: string) => boolean;
   projectUsers: UserInfo[];
   modelFields?: FieldInfo[];
   projectModels: ModelInfo[];
@@ -127,6 +129,7 @@ export const TipTapComposer = forwardRef<
       placeholder = 'Write a comment...',
       ariaLabel = 'Write a comment',
       maxLength,
+      onLargePaste,
       projectUsers,
       modelFields = [],
       projectModels,
@@ -187,6 +190,8 @@ export const TipTapComposer = forwardRef<
     const onFieldMentionIntentRef = useRef(onFieldMentionIntent);
     const onUserMentionIntentRef = useRef(onUserMentionIntent);
     const onSegmentsChangeRef = useRef(onSegmentsChange);
+    const onLargePasteRef = useRef(onLargePaste);
+    onLargePasteRef.current = onLargePaste;
 
     useEffect(() => {
       return () => {
@@ -984,6 +989,23 @@ export const TipTapComposer = forwardRef<
           'aria-multiline': 'true',
           role: 'textbox',
           tabindex: disabled ? '-1' : '0',
+        },
+        handlePaste: (_view, event) => {
+          const clipboard = event.clipboardData;
+          if (
+            !clipboard ||
+            disabledRef.current ||
+            !onLargePasteRef.current ||
+            (clipboard.files?.length ?? 0) > 0
+          ) {
+            return false;
+          }
+          const text = clipboard.getData('text/plain');
+          if (!text || !onLargePasteRef.current(text)) {
+            return false;
+          }
+          event.preventDefault();
+          return true;
         },
         handleKeyDown: (_view, event) => {
           // Submit on Enter (when not in slash command mode)
