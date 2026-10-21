@@ -17,7 +17,7 @@ import {
   fallbackRecordMention,
 } from '../lib/mentions';
 import type { NavigationCallbacks } from '../recordComments/entrypoints/contexts/NavigationCallbacksContext';
-import { MentionComposer } from './MentionComposer';
+import { LARGE_PASTE_CHARACTERS, MentionComposer } from './MentionComposer';
 
 vi.mock('datocms-react-ui', async (importOriginal) => {
   const original = await importOriginal<typeof import('datocms-react-ui')>();
@@ -339,6 +339,78 @@ describe('MentionComposer', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(
       'Images must be 10 MB or smaller',
     );
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'A message can include up to 5 files',
+    );
+  });
+
+  it('turns a long paste into a Markdown file attachment', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderComposer(createHost(), { onSubmit });
+    const editor = screen.getByRole('textbox', {
+      name: 'Message the DatoCMS agent',
+    });
+    const longText = `# Brief\n${'x'.repeat(LARGE_PASTE_CHARACTERS + 1000)}`;
+
+    pasteText(editor, longText);
+    pasteText(editor, longText);
+
+    expect(
+      await screen.findByRole('button', { name: 'Remove Pasted text.md' }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Remove Pasted text 2.md' }),
+    ).toBeVisible();
+    expect(editor).not.toHaveTextContent('# Brief');
+    expect(screen.queryByText(/too long/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    const submission = onSubmit.mock.calls[0]?.[0] as AgentComposerSubmission;
+    expect(submission.attachments).toHaveLength(2);
+    expect(submission.attachments?.[0]).toMatchObject({
+      filename: 'Pasted text.md',
+      mimeType: 'text/markdown',
+      size: longText.length,
+    });
+    const file = getSessionLocalFile(submission.attachments?.[0]?.id ?? '');
+    expect(await file?.text()).toBe(longText);
+  });
+
+  it('keeps a short paste as message text', () => {
+    renderComposer(createHost());
+    const editor = screen.getByRole('textbox', {
+      name: 'Message the DatoCMS agent',
+    });
+
+    pasteText(editor, 'Run step 1 only.');
+
+    expect(editor).toHaveTextContent('Run step 1 only.');
+    expect(
+      screen.queryByRole('button', { name: 'Remove Pasted text.md' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('pastes long text inline and explains why when no file slot is left', async () => {
+    const user = userEvent.setup();
+    renderComposer(createHost());
+    await user.upload(
+      screen.getByLabelText('Choose files from computer'),
+      Array.from(
+        { length: 5 },
+        (_, index) => new File(['x'], `file-${index + 1}.txt`),
+      ),
+    );
+    const editor = screen.getByRole('textbox', {
+      name: 'Message the DatoCMS agent',
+    });
+
+    pasteText(editor, 'y'.repeat(LARGE_PASTE_CHARACTERS + 1));
+
+    expect(
+      screen.queryByRole('button', { name: 'Remove Pasted text.md' }),
+    ).not.toBeInTheDocument();
+    expect(editor).toHaveTextContent('yyyy');
     expect(screen.getByRole('alert')).toHaveTextContent(
       'A message can include up to 5 files',
     );

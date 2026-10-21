@@ -49,6 +49,29 @@ function mentionCount(segments: readonly CommentSegment[]) {
   return segments.filter((segment) => segment.type === 'mention').length;
 }
 
+export const LARGE_PASTE_CHARACTERS = 5_000;
+
+function pastedTextFile(
+  text: string,
+  segments: readonly CommentSegment[],
+): File {
+  const taken = new Set(
+    segments.flatMap((segment) =>
+      segment.type === 'mention' && segment.mention.type === 'file'
+        ? [segment.mention.filename]
+        : [],
+    ),
+  );
+  let filename = 'Pasted text.md';
+  for (let index = 2; taken.has(filename); index += 1) {
+    filename = `Pasted text ${index}.md`;
+  }
+  return new File([text], filename, {
+    type: 'text/markdown',
+    lastModified: Date.now(),
+  });
+}
+
 function dragIncludesFiles(event: DragEvent): boolean {
   return Array.from(event.dataTransfer?.types ?? []).includes('Files');
 }
@@ -77,7 +100,7 @@ function localFileRejection(
 }
 
 function selectAllowedLocalFiles(
-  files: FileList,
+  files: Iterable<File>,
   segments: readonly CommentSegment[],
 ): { acceptedFiles: File[]; error?: string } {
   const currentFiles = segments.flatMap((segment) =>
@@ -301,6 +324,29 @@ export function MentionComposer({
     composerRef.current?.focus();
   }, []);
 
+  const attachPastedText = useCallback((text: string): boolean => {
+    if (inputDisabledRef.current || text.length <= LARGE_PASTE_CHARACTERS) {
+      return false;
+    }
+
+    const currentSegments =
+      composerRef.current?.getSegments() ?? segmentsRef.current;
+    const file = pastedTextFile(text, currentSegments);
+    const { acceptedFiles, error } = selectAllowedLocalFiles(
+      [file],
+      currentSegments,
+    );
+    if (acceptedFiles.length === 0) {
+      setPickerError(error);
+      return false;
+    }
+
+    setPickerError(undefined);
+    composerRef.current?.insertMentions(acceptedFiles.map(registerLocalFile));
+    composerRef.current?.focus();
+    return true;
+  }, []);
+
   useEffect(() => {
     const resetFileDrag = () => {
       fileDragDepthRef.current = 0;
@@ -413,6 +459,7 @@ export function MentionComposer({
             fieldMentionsLoading={fieldsLoading}
             maxLength={MAX_CONVERSATION_MESSAGE_CHARACTERS}
             modelFields={modelFields}
+            onLargePaste={attachPastedText}
             onAssetTrigger={() => {
               void selectAsset();
             }}
@@ -498,7 +545,8 @@ export function MentionComposer({
           )}
           {tooLong && (
             <p role="alert">
-              This message is too long. Remove some text or references.
+              This message is too long. Attach long text as a file, or paste it
+              again to attach it automatically.
             </p>
           )}
           {usersError && <p role="alert">{usersError}</p>}
