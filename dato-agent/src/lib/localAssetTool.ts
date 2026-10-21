@@ -34,22 +34,58 @@ export const CREATE_DATO_ASSET_TOOL = {
         description:
           'An optional destination filename, or null to preserve/infer the source filename.',
       },
+      author: {
+        type: ['string', 'null'],
+        description:
+          'The photographer or creator to store on the asset, or null. Use the author value from search_stock_images results.',
+      },
+      copyright: {
+        type: ['string', 'null'],
+        description:
+          'The credit line to store on the asset, e.g. "Photo by Ana Silva on Pexels", or null.',
+      },
+      notes: {
+        type: ['string', 'null'],
+        description:
+          'Internal notes such as the source page and license, or null.',
+      },
+      alt: {
+        type: ['string', 'null'],
+        description:
+          'Default alternative text in the project’s main locale, or null.',
+      },
     },
-    required: ['source', 'attachment_id', 'url', 'filename'],
+    required: [
+      'source',
+      'attachment_id',
+      'url',
+      'filename',
+      'author',
+      'copyright',
+      'notes',
+      'alt',
+    ],
   },
 } as const satisfies FunctionTool;
 
+export type CreateDatoAssetMetadata = {
+  author?: string;
+  copyright?: string;
+  notes?: string;
+  alt?: string;
+};
+
 export type CreateDatoAssetInput =
-  | {
+  | ({
       source: 'attached_file';
       attachmentId: string;
       filename?: string;
-    }
-  | {
+    } & CreateDatoAssetMetadata)
+  | ({
       source: 'url';
       url: string;
       filename?: string;
-    };
+    } & CreateDatoAssetMetadata);
 
 export type CreateDatoAssetResult = {
   uploadId: string;
@@ -77,7 +113,16 @@ function parsedObject(rawArguments: string): Record<string, unknown> {
 }
 
 function rejectUnexpectedKeys(value: Record<string, unknown>): void {
-  const allowed = new Set(['source', 'attachment_id', 'url', 'filename']);
+  const allowed = new Set([
+    'source',
+    'attachment_id',
+    'url',
+    'filename',
+    'author',
+    'copyright',
+    'notes',
+    'alt',
+  ]);
   const unexpected = Object.keys(value).find((key) => !allowed.has(key));
   if (unexpected) {
     throw new Error(
@@ -128,12 +173,40 @@ function assetUrl(value: unknown): string {
   }
 }
 
+function optionalText(
+  value: unknown,
+  key: keyof CreateDatoAssetMetadata,
+  maxLength: number,
+): Partial<CreateDatoAssetMetadata> {
+  if (value === null || value === undefined) return {};
+  if (typeof value !== 'string') {
+    throw new Error(`${key} must be a string or null.`);
+  }
+  const text = value.trim();
+  if (text.length > maxLength) {
+    throw new Error(`${key} must not exceed ${maxLength} characters.`);
+  }
+  return text ? { [key]: text } : {};
+}
+
+function assetMetadata(
+  value: Record<string, unknown>,
+): CreateDatoAssetMetadata {
+  return {
+    ...optionalText(value.author, 'author', 200),
+    ...optionalText(value.copyright, 'copyright', 300),
+    ...optionalText(value.notes, 'notes', 1_000),
+    ...optionalText(value.alt, 'alt', 500),
+  };
+}
+
 export function parseCreateDatoAssetInput(
   rawArguments: string,
 ): CreateDatoAssetInput {
   const value = parsedObject(rawArguments);
   rejectUnexpectedKeys(value);
   const filename = optionalFilename(value.filename);
+  const metadata = assetMetadata(value);
 
   if (value.source === 'attached_file') {
     if (value.url !== null) {
@@ -143,6 +216,7 @@ export function parseCreateDatoAssetInput(
       source: 'attached_file',
       attachmentId: attachmentId(value.attachment_id),
       ...(filename ? { filename } : {}),
+      ...metadata,
     };
   }
 
@@ -154,6 +228,7 @@ export function parseCreateDatoAssetInput(
       source: 'url',
       url: assetUrl(value.url),
       ...(filename ? { filename } : {}),
+      ...metadata,
     };
   }
 

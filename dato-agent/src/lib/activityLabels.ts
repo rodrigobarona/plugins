@@ -729,6 +729,8 @@ function localInProgressLabel(
       return 'Opening the full editor';
     case 'get_record_preview_links':
       return 'Looking up the website URL';
+    case 'search_stock_images':
+      return 'Searching stock photos';
     case 'show_records': {
       return prefixedCountLabel(
         argumentsRecord,
@@ -821,6 +823,8 @@ function localCompletedLabel(
       return 'Full editor ready';
     case 'get_record_preview_links':
       return 'Website URL ready';
+    case 'search_stock_images':
+      return 'Stock photos found';
     case 'show_records': {
       return suffixedCountLabel(
         argumentsRecord,
@@ -906,6 +910,8 @@ function localFailedLabel(toolName: string): string {
       return 'Could not open the full editor';
     case 'get_record_preview_links':
       return 'Could not look up the website URL';
+    case 'search_stock_images':
+      return 'Could not search stock photos';
     case 'present_records':
       return 'Could not add record links';
     case 'present_fields':

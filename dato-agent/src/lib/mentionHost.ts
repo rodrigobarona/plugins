@@ -72,17 +72,25 @@ export type AgentMentionHost = {
   openLocalFile: (file: LocalFileMention) => Promise<void>;
 };
 
+export type AgentAssetCreationMetadata = {
+  author?: string;
+  copyright?: string;
+  notes?: string;
+  /** Stored as the default alt text of the project's main locale. */
+  alt?: string;
+};
+
 export type AgentAssetCreationInput =
-  | {
+  | ({
       source: 'file';
       fileOrBlob: File | Blob;
       filename: string;
-    }
-  | {
+    } & AgentAssetCreationMetadata)
+  | ({
       source: 'url';
       url: string;
       filename?: string;
-    };
+    } & AgentAssetCreationMetadata);
 
 export type AgentAssetCreationOptions = {
   /** Session-wide auto approve can bypass this one native confirmation. */
@@ -694,9 +702,20 @@ async function createAssetWithClient({
     throw new DOMException('Asset creation was cancelled.', 'AbortError');
   options.onUploadDispatch?.();
 
+  const mainLocale = ctx.site.attributes.locales[0] ?? 'en';
   const uploadRequest = client.uploads.createFromFileOrBlob({
     fileOrBlob,
     filename,
+    ...(input.author ? { author: input.author } : {}),
+    ...(input.copyright ? { copyright: input.copyright } : {}),
+    ...(input.notes ? { notes: input.notes } : {}),
+    ...(input.alt
+      ? {
+          default_field_metadata: {
+            alt: { [mainLocale]: input.alt },
+          },
+        }
+      : {}),
   });
   const detachAbort = cancelUploadOnAbort(uploadRequest, options.signal);
   try {

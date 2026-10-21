@@ -72,6 +72,12 @@ import {
 } from './mcpPolicy';
 import type { LocalFileAttachmentDescriptor } from './mentions';
 import { providerModelSupportsFastMode } from './providerModels';
+import {
+  parseStockImageSearchInput,
+  SEARCH_STOCK_IMAGES_TOOL,
+  SEARCH_STOCK_IMAGES_TOOL_NAME,
+  type StockImageSearchCallback,
+} from './stockImageTool';
 import { type AgentSystemContext, buildSystemPrompt } from './systemPrompt';
 import { createVercelGatewayFetch } from './vercelGateway';
 
@@ -676,6 +682,11 @@ export interface AgentRuntimeConfig {
    * create uploads.
    */
   createDatoAsset?: CreateDatoAssetCallback;
+  /**
+   * Optional stock photo search, available when the administrator saved a
+   * Pexels or Unsplash key. When absent, the local tool is not advertised.
+   */
+  searchStockImages?: StockImageSearchCallback;
   maxContinuations?: number;
   /**
    * Inject a small Responses client in tests or when requests are proxied through
@@ -3235,6 +3246,7 @@ interface ExecuteLocalToolCallsOptions {
   getModelSchema?: GetModelSchemaCallback;
   getRecordPreviewLinks?: GetRecordPreviewLinksCallback;
   createDatoAsset?: CreateDatoAssetCallback;
+  searchStockImages?: StockImageSearchCallback;
   readOnly?: boolean;
   loadedModelSchemaIdentifiers: Set<string>;
   signal?: AbortSignal;
@@ -3281,6 +3293,7 @@ async function* executeLocalToolCalls({
   getModelSchema,
   getRecordPreviewLinks,
   createDatoAsset,
+  searchStockImages,
   readOnly = false,
   loadedModelSchemaIdentifiers,
   signal,
@@ -3506,6 +3519,20 @@ async function* executeLocalToolCalls({
           itemId: parsed.itemId,
           ...(parsed.locale ? { locale: parsed.locale } : {}),
         });
+      } else if (call.name === SEARCH_STOCK_IMAGES_TOOL_NAME) {
+        if (!searchStockImages) {
+          throw new Error(
+            'Stock image search is not configured. Ask an administrator to add a Pexels or Unsplash key in the plugin settings.',
+          );
+        }
+        const parsed = parseStockImageSearchInput(call.arguments);
+        activityArguments = parsed;
+        const result = await searchStockImages(parsed, signal);
+        throwIfAborted(signal);
+        output = stringifyCallbackResult(result, {
+          action: SEARCH_STOCK_IMAGES_TOOL_NAME,
+          count: result.results.length,
+        });
       } else {
         throw new Error(`Unsupported local tool: ${call.name}.`);
       }
@@ -3573,6 +3600,7 @@ export class AgentRuntime implements AgentRuntimeHandle {
   private readonly getModelSchema?: GetModelSchemaCallback;
   private readonly getRecordPreviewLinks?: GetRecordPreviewLinksCallback;
   private readonly createDatoAsset?: CreateDatoAssetCallback;
+  private readonly searchStockImages?: StockImageSearchCallback;
   private readonly pendingApprovalBundles = new Map<
     string,
     PendingApprovalBundle
@@ -3598,6 +3626,7 @@ export class AgentRuntime implements AgentRuntimeHandle {
     this.getModelSchema = config.getModelSchema;
     this.getRecordPreviewLinks = config.getRecordPreviewLinks;
     this.createDatoAsset = config.createDatoAsset;
+    this.searchStockImages = config.searchStockImages;
     this.client =
       config.client ??
       createDefaultClient(
@@ -4041,6 +4070,7 @@ export class AgentRuntime implements AgentRuntimeHandle {
       ),
       ...(this.getModelSchema ? [GET_MODEL_SCHEMA_TOOL] : []),
       ...(this.getRecordPreviewLinks ? [GET_RECORD_PREVIEW_LINKS_TOOL] : []),
+      ...(this.searchStockImages ? [SEARCH_STOCK_IMAGES_TOOL] : []),
     ];
   }
 
@@ -5035,6 +5065,7 @@ export class AgentRuntime implements AgentRuntimeHandle {
       getModelSchema: this.getModelSchema,
       getRecordPreviewLinks: this.getRecordPreviewLinks,
       createDatoAsset: this.createDatoAsset,
+      searchStockImages: this.searchStockImages,
       readOnly: this.readOnly,
       loadedModelSchemaIdentifiers,
       signal,
@@ -5480,7 +5511,8 @@ function anthropicLocalTool(
   tool:
     | LocalFunctionTool
     | typeof GET_MODEL_SCHEMA_TOOL
-    | typeof GET_RECORD_PREVIEW_LINKS_TOOL,
+    | typeof GET_RECORD_PREVIEW_LINKS_TOOL
+    | typeof SEARCH_STOCK_IMAGES_TOOL,
 ): AnthropicTool {
   return {
     name: tool.name,
@@ -5868,6 +5900,7 @@ export class AnthropicAgentRuntime implements AgentRuntimeHandle {
   private readonly getModelSchema?: GetModelSchemaCallback;
   private readonly getRecordPreviewLinks?: GetRecordPreviewLinksCallback;
   private readonly createDatoAsset?: CreateDatoAssetCallback;
+  private readonly searchStockImages?: StockImageSearchCallback;
   private readonly pendingApprovalBundles = new Map<
     string,
     PendingAnthropicApproval
@@ -5903,6 +5936,7 @@ export class AnthropicAgentRuntime implements AgentRuntimeHandle {
     this.getModelSchema = config.getModelSchema;
     this.getRecordPreviewLinks = config.getRecordPreviewLinks;
     this.createDatoAsset = config.createDatoAsset;
+    this.searchStockImages = config.searchStockImages;
     this.client = transport.client;
     this.fileClient = transport.fileClient;
 
@@ -6570,6 +6604,9 @@ export class AnthropicAgentRuntime implements AgentRuntimeHandle {
       ...(this.getRecordPreviewLinks
         ? [anthropicLocalTool(GET_RECORD_PREVIEW_LINKS_TOOL)]
         : []),
+      ...(this.searchStockImages
+        ? [anthropicLocalTool(SEARCH_STOCK_IMAGES_TOOL)]
+        : []),
     ];
   }
 
@@ -6746,6 +6783,7 @@ export class AnthropicAgentRuntime implements AgentRuntimeHandle {
             getModelSchema: this.getModelSchema,
             getRecordPreviewLinks: this.getRecordPreviewLinks,
             createDatoAsset: this.createDatoAsset,
+            searchStockImages: this.searchStockImages,
             readOnly: this.readOnly,
             loadedModelSchemaIdentifiers: state.loadedModelSchemaIdentifiers,
             signal,

@@ -125,6 +125,7 @@ import {
   revokeToken,
   waitForOAuthCallback,
 } from '../lib/oauth';
+import { createStockImageSearch } from '../lib/stockImageTool';
 import { type AgentSurfaceKind, buildSystemPrompt } from '../lib/systemPrompt';
 import {
   createUnsafeDispatchJournalStore,
@@ -1920,6 +1921,14 @@ export default function AgentFrame(props: AgentFrameProps) {
     () => createAutoApprovalStore(autoApprovalScope),
     [autoApprovalScope],
   );
+  const stockImageSearch = useMemo(
+    () =>
+      createStockImageSearch({
+        pexelsApiKey: props.config.pexelsApiKey,
+        unsplashAccessKey: props.config.unsplashAccessKey,
+      }),
+    [props.config.pexelsApiKey, props.config.unsplashAccessKey],
+  );
   const readOnlyRef = useRef(true);
   const pluginReadOnlyRef = useRef(props.config.readOnly);
   const conversationStorageContext = useMemo(
@@ -3475,6 +3484,12 @@ export default function AgentFrame(props: AgentFrameProps) {
             );
           }
 
+          const assetMetadata = {
+            ...(input.author ? { author: input.author } : {}),
+            ...(input.copyright ? { copyright: input.copyright } : {}),
+            ...(input.notes ? { notes: input.notes } : {}),
+            ...(input.alt ? { alt: input.alt } : {}),
+          };
           const source =
             input.source === 'attached_file'
               ? (() => {
@@ -3494,12 +3509,14 @@ export default function AgentFrame(props: AgentFrameProps) {
                     source: 'file' as const,
                     fileOrBlob: file,
                     filename: input.filename ?? attachment.filename,
+                    ...assetMetadata,
                   };
                 })()
               : {
                   source: 'url' as const,
                   url: input.url,
                   ...(input.filename ? { filename: input.filename } : {}),
+                  ...assetMetadata,
                 };
           await prepareWriteAccess(signal);
           const automaticUpload =
@@ -3551,6 +3568,9 @@ export default function AgentFrame(props: AgentFrameProps) {
             }
             throw error;
           }
+          if (input.source === 'url') {
+            void stockImageSearch?.trackDownload(input.url);
+          }
           await appendAssetResults('Asset created', [
             { uploadId: mention.id, label: mention.filename },
           ]);
@@ -3585,6 +3605,7 @@ export default function AgentFrame(props: AgentFrameProps) {
       hostContext,
       getModelSchema: props.getModelSchema,
       getRecordPreviewLinks: props.getRecordPreviewLinks,
+      searchStockImages: stockImageSearch?.search,
       ...(!readOnlyRef.current && createDatoAsset ? { createDatoAsset } : {}),
       context: runtimeSystemContext(),
       navigation: {

@@ -50,6 +50,44 @@ describe('local DatoCMS asset-creation tool', () => {
     });
   });
 
+  it('keeps stock photo credits and drops empty metadata', () => {
+    expect(
+      parseCreateDatoAssetInput(
+        JSON.stringify({
+          source: 'url',
+          attachment_id: null,
+          url: 'https://images.pexels.com/photos/1/a.jpeg?w=2400',
+          filename: 'surf.jpg',
+          author: 'Ana Silva',
+          copyright: 'Photo by Ana Silva on Pexels',
+          notes: '  ',
+          alt: 'Surfer at Supertubos',
+        }),
+      ),
+    ).toEqual({
+      source: 'url',
+      url: 'https://images.pexels.com/photos/1/a.jpeg?w=2400',
+      filename: 'surf.jpg',
+      author: 'Ana Silva',
+      copyright: 'Photo by Ana Silva on Pexels',
+      alt: 'Surfer at Supertubos',
+    });
+  });
+
+  it('rejects non-string credit metadata', () => {
+    expect(() =>
+      parseCreateDatoAssetInput(
+        JSON.stringify({
+          source: 'url',
+          attachment_id: null,
+          url: 'https://example.com/a.png',
+          filename: null,
+          author: 42,
+        }),
+      ),
+    ).toThrow('author must be a string or null.');
+  });
+
   it.each([
     'http://localhost/asset.png',
     'http://127.0.0.1/asset.png',

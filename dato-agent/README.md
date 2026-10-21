@@ -20,6 +20,8 @@ The provider API key is shared by the whole project. Each user's DatoCMS connect
 
 Vercel AI Gateway uses an API key from **Vercel → AI Gateway → API keys**. Requests are billed to that team's AI Gateway credits, or to bring-your-own provider keys configured on the gateway. The model list starts with a short recommended set (Claude Sonnet 5.5 by default, plus Opus, Haiku, GPT, Gemini, and Grok options). **Show all tool-capable models** reveals the rest of the catalog. Models that are not Claude are translated through the gateway's Anthropic Messages API, so tool calls work the same way, but zero data retention depends on the model: only models marked ZDR on every route keep that guarantee. Fast mode selects the model's `-fast` variant when the catalog publishes one.
 
+To let the agent find images, add a [Pexels API key](https://www.pexels.com/api/), an [Unsplash access key](https://unsplash.com/developers), or both under **Stock photos**. The agent searches, shows you a few options with their credits, and saves only the photos you pick, with the photographer and source stored on the asset.
+
 ## Permissions
 
 The agent can never do more than the user's role allows. On top of that, the access level chosen when connecting DatoCMS applies (**Only read content** blocks every write), and the plugin's **Read Only** setting turns off all agent writes for everyone.

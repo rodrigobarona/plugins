@@ -96,6 +96,10 @@ export type AgentConfig = {
    * allowed separately. `null` means this setting has not been configured yet.
    */
   allowedRoleIds: string[] | null;
+  /** Enables stock photo search on Pexels when set. */
+  pexelsApiKey: string;
+  /** Enables stock photo search on Unsplash when set. */
+  unsplashAccessKey: string;
 };
 
 export const DEFAULT_CONFIG: AgentConfig = {
@@ -122,6 +126,8 @@ export const DEFAULT_CONFIG: AgentConfig = {
   previewFrontends: [],
   websiteBaseUrl: '',
   allowedRoleIds: null,
+  pexelsApiKey: '',
+  unsplashAccessKey: '',
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -254,6 +260,8 @@ export function normalizeConfig(parameters: unknown): AgentConfig {
   const previewFrontends = normalizePreviewFrontends(source.previewFrontends);
   const websiteBaseUrl = normalizeWebsiteBaseUrl(source.websiteBaseUrl);
   const allowedRoleIds = normalizeRoleIds(source.allowedRoleIds);
+  const pexelsApiKey = trimmedString(source.pexelsApiKey);
+  const unsplashAccessKey = trimmedString(source.unsplashAccessKey);
 
   return {
     provider,
@@ -279,6 +287,8 @@ export function normalizeConfig(parameters: unknown): AgentConfig {
     previewFrontends,
     websiteBaseUrl,
     allowedRoleIds,
+    pexelsApiKey,
+    unsplashAccessKey,
   };
 }
 

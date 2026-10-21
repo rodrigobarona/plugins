@@ -1168,6 +1168,63 @@ describe('AgentRuntime', () => {
     );
   });
 
+  it('advertises and runs stock image search only when the host provides it', async () => {
+    const searchCall = {
+      type: 'function_call',
+      id: 'function-stock',
+      call_id: 'call-stock',
+      name: 'search_stock_images',
+      arguments: JSON.stringify({
+        query: 'surfer Peniche',
+        provider: 'both',
+        orientation: 'landscape',
+        per_page: null,
+      }),
+      status: 'completed',
+    } satisfies ResponseFunctionToolCall;
+    const client = new QueueResponsesClient([
+      eventsFor(response('resp-stock', [searchCall])),
+      eventsFor(response('resp-stock-done'), ['Here are some photos.']),
+    ]);
+    const searchStockImages = vi.fn().mockResolvedValue({
+      query: 'surfer Peniche',
+      results: [
+        {
+          provider: 'pexels',
+          id: '1',
+          download_url: 'https://images.pexels.com/photos/1/a.jpeg?w=2400',
+        },
+      ],
+      errors: [],
+    });
+    const runtime = runtimeWith(client, { searchStockImages });
+
+    await drain(runtime.streamTurn({ message: 'Find a surf photo' }));
+
+    expect(
+      JSON.stringify(client.requests[0]?.tools).includes('search_stock_images'),
+    ).toBe(true);
+    expect(searchStockImages.mock.calls[0]?.[0]).toEqual({
+      query: 'surfer Peniche',
+      providers: ['pexels', 'unsplash'],
+      orientation: 'landscape',
+      perPage: 6,
+    });
+    expect(JSON.stringify(client.requests[1]?.input)).toContain(
+      'images.pexels.com',
+    );
+
+    const plainClient = new QueueResponsesClient([
+      eventsFor(response('resp-plain'), ['Hi']),
+    ]);
+    await drain(runtimeWith(plainClient).streamTurn({ message: 'Hello' }));
+    expect(
+      JSON.stringify(plainClient.requests[0]?.tools).includes(
+        'search_stock_images',
+      ),
+    ).toBe(false);
+  });
+
   it('injects host context once and keeps continuations on the stored response chain', async () => {
     const openCall = {
       type: 'function_call',

@@ -1074,6 +1074,50 @@ function WebsiteLinksSection({
   );
 }
 
+function StockPhotosSection({
+  canEdit,
+  onPexelsApiKeyChange,
+  onUnsplashAccessKeyChange,
+  pexelsApiKey,
+  saving,
+  unsplashAccessKey,
+}: {
+  canEdit: boolean;
+  onPexelsApiKeyChange: (value: string) => void;
+  onUnsplashAccessKeyChange: (value: string) => void;
+  pexelsApiKey: string;
+  saving: boolean;
+  unsplashAccessKey: string;
+}) {
+  const disabled = !canEdit || saving;
+  return (
+    <Section title="Stock photos">
+      <FieldGroup>
+        <TextField
+          id="pexels-api-key"
+          name="pexels-api-key"
+          label="Pexels API key"
+          value={pexelsApiKey}
+          placeholder="Optional"
+          hint="Lets the agent search free photos on Pexels. Create a key at pexels.com/api."
+          onChange={onPexelsApiKeyChange}
+          textInputProps={{ autoComplete: 'off', disabled, monospaced: true }}
+        />
+        <TextField
+          id="unsplash-access-key"
+          name="unsplash-access-key"
+          label="Unsplash access key"
+          value={unsplashAccessKey}
+          placeholder="Optional"
+          hint="Lets the agent search free photos on Unsplash. Create an app at unsplash.com/developers and use its access key."
+          onChange={onUnsplashAccessKeyChange}
+          textInputProps={{ autoComplete: 'off', disabled, monospaced: true }}
+        />
+      </FieldGroup>
+    </Section>
+  );
+}
+
 export default function ConfigScreen({ ctx }: Props) {
   const incomingConfig = useMemo(
     () => normalizeConfig(ctx.plugin.attributes.parameters),
@@ -1327,6 +1371,17 @@ export default function ConfigScreen({ ctx }: Props) {
               />
             </FieldGroup>
           </Section>
+
+          <StockPhotosSection
+            canEdit={canEditSchema}
+            saving={saving}
+            onPexelsApiKeyChange={(value) => update('pexelsApiKey', value)}
+            onUnsplashAccessKeyChange={(value) =>
+              update('unsplashAccessKey', value)
+            }
+            pexelsApiKey={config.pexelsApiKey}
+            unsplashAccessKey={config.unsplashAccessKey}
+          />
 
           <WebsiteLinksSection
             accessToken={ctx.currentUserAccessToken}
