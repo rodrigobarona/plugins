@@ -2074,6 +2074,27 @@ describe('AgentSurface', () => {
     expect(control).toHaveAttribute('aria-pressed', 'false');
   });
 
+  it('explains a busy auto-approve block and shows its error', () => {
+    const reason =
+      'Approve or reject the pending change before turning on auto-approve.';
+    render(
+      <AgentSurface
+        autoApproveDisabledReason={reason}
+        autoApproveError={reason}
+        connection={connected}
+        entries={[]}
+        onAutoApproveChange={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: reason })).toBeDisabled();
+    expect(
+      screen.queryByRole('button', { name: 'Turn on auto-approve' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(reason);
+  });
+
   it('hides automatic approval cards unless automatic execution fails', () => {
     const automaticApproval: UnsafeApprovalViewModel = {
       id: 'automatic',
