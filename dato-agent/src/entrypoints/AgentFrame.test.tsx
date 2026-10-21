@@ -30,7 +30,10 @@ import type {
 } from '../lib/mentions';
 import { RemoteMcpOAuthError } from '../lib/oauth';
 import { createUnsafeDispatchJournalStore } from '../lib/unsafeDispatchJournal';
-import AgentFrame, { type AgentFrameProps } from './AgentFrame';
+import AgentFrame, {
+  type AgentFrameProps,
+  AUTO_APPROVE_PENDING_APPROVAL_REASON,
+} from './AgentFrame';
 
 const mocks = vi.hoisted(() => ({
   whoami: vi.fn(),
@@ -3519,6 +3522,39 @@ describe('AgentFrame', () => {
     });
     expect(mocks.surfaceProps?.autoApproveEnabled).toBe(false);
     expect(store.isEnabled()).toBe(false);
+  });
+
+  it('explains why auto-approve cannot be turned on while a change is pending', async () => {
+    const frameProps = props();
+    render(<AgentFrame {...frameProps} />);
+    await startApprovalTurn();
+
+    await waitFor(() =>
+      expect(mocks.surfaceProps?.autoApproveDisabledReason).toBe(
+        AUTO_APPROVE_PENDING_APPROVAL_REASON,
+      ),
+    );
+
+    await act(async () => {
+      await expect(
+        mocks.surfaceProps?.onAutoApproveChange?.(true),
+      ).resolves.toBe(false);
+    });
+    expect(frameProps.onConfirmEnableAutoApprove).not.toHaveBeenCalled();
+    expect(mocks.surfaceProps?.autoApproveError).toBe(
+      AUTO_APPROVE_PENDING_APPROVAL_REASON,
+    );
+    expect(mocks.surfaceProps?.autoApproveEnabled).toBe(false);
+  });
+
+  it('has no busy reason when idle so the confirmation chain opens', async () => {
+    const frameProps = props();
+    render(<AgentFrame {...frameProps} />);
+
+    await waitFor(() =>
+      expect(mocks.surfaceProps?.onAutoApproveChange).toBeDefined(),
+    );
+    expect(mocks.surfaceProps?.autoApproveDisabledReason).toBeUndefined();
   });
 
   it('opens only one auto-approve confirmation chain at a time', async () => {

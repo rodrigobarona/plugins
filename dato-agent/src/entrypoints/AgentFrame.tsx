@@ -765,6 +765,24 @@ function directAssetCanOpen(
   return !asset.deleted && !hostActionPending;
 }
 
+export const AUTO_APPROVE_PENDING_APPROVAL_REASON =
+  'Approve or reject the pending change before turning on auto-approve.';
+export const AUTO_APPROVE_RUNNING_REASON =
+  'Wait for the current reply to finish before turning on auto-approve.';
+export const AUTO_APPROVE_HOST_ACTION_REASON =
+  'Close the open dialog before turning on auto-approve.';
+
+function autoApproveBlockedReason(state: {
+  pendingApprovals: boolean;
+  running: boolean;
+  hostActionPending: boolean;
+}): string | undefined {
+  if (state.pendingApprovals) return AUTO_APPROVE_PENDING_APPROVAL_REASON;
+  if (state.running) return AUTO_APPROVE_RUNNING_REASON;
+  if (state.hostActionPending) return AUTO_APPROVE_HOST_ACTION_REASON;
+  return undefined;
+}
+
 async function openAssetInHost(
   navigator: AgentNavigator,
   asset: AgentAssetResultViewModel,
@@ -2136,6 +2154,26 @@ export default function AgentFrame(props: AgentFrameProps) {
     window.addEventListener('storage', synchronizeAutoApproval);
     return () => window.removeEventListener('storage', synchronizeAutoApproval);
   }, [autoApprovalStore]);
+
+  const autoApproveBusyReason =
+    autoApproveEnabled || autoApproveChanging
+      ? undefined
+      : autoApproveBlockedReason({
+          pendingApprovals: pendingApprovals.size > 0,
+          running,
+          hostActionPending,
+        });
+
+  useEffect(() => {
+    if (autoApproveBusyReason) return;
+    setAutoApproveError((current) =>
+      current === AUTO_APPROVE_PENDING_APPROVAL_REASON ||
+      current === AUTO_APPROVE_RUNNING_REASON ||
+      current === AUTO_APPROVE_HOST_ACTION_REASON
+        ? undefined
+        : current,
+    );
+  }, [autoApproveBusyReason]);
 
   const updateEntries = (
     updater: (current: AgentTranscriptEntry[]) => AgentTranscriptEntry[],
@@ -5349,11 +5387,19 @@ export default function AgentFrame(props: AgentFrameProps) {
 
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Confirmation, busy-state revalidation, persistence, and fail-closed UI state form one activation transaction.
   async function changeAutoApprove(nextEnabled: boolean): Promise<boolean> {
-    if (autoApproveChangeRef.current || hostActionPendingRef.current) {
+    if (autoApproveChangeRef.current) {
+      return false;
+    }
+
+    if (hostActionPendingRef.current) {
+      if (nextEnabled) {
+        setAutoApproveError(AUTO_APPROVE_HOST_ACTION_REASON);
+      }
       return false;
     }
 
     if (nextEnabled && readOnlyRef.current) {
+      setAutoApproveError(accessRestrictionReason());
       return false;
     }
 
@@ -5372,16 +5418,20 @@ export default function AgentFrame(props: AgentFrameProps) {
       }
     }
 
-    if (
-      running ||
-      activeTurnRef.current ||
-      pendingApprovalsRef.current.size > 0 ||
-      approvalDispatchRef.current.size > 0
-    ) {
+    const blockedReason = autoApproveBlockedReason({
+      pendingApprovals:
+        pendingApprovalsRef.current.size > 0 ||
+        approvalDispatchRef.current.size > 0,
+      running: running || Boolean(activeTurnRef.current),
+      hostActionPending: false,
+    });
+    if (blockedReason) {
+      setAutoApproveError(blockedReason);
       return false;
     }
 
     if (!beginHostAction()) {
+      setAutoApproveError(AUTO_APPROVE_HOST_ACTION_REASON);
       return false;
     }
 
@@ -5390,13 +5440,18 @@ export default function AgentFrame(props: AgentFrameProps) {
     setAutoApproveError(undefined);
     try {
       const confirmed = await props.onConfirmEnableAutoApprove();
-      if (
-        !mountedRef.current ||
-        !confirmed ||
-        activeTurnRef.current ||
-        pendingApprovalsRef.current.size > 0 ||
-        approvalDispatchRef.current.size > 0
-      ) {
+      if (!mountedRef.current || !confirmed) {
+        return false;
+      }
+      const blockedAfterConfirm = autoApproveBlockedReason({
+        pendingApprovals:
+          pendingApprovalsRef.current.size > 0 ||
+          approvalDispatchRef.current.size > 0,
+        running: Boolean(activeTurnRef.current),
+        hostActionPending: false,
+      });
+      if (blockedAfterConfirm) {
+        setAutoApproveError(blockedAfterConfirm);
         return false;
       }
 
@@ -6073,7 +6128,7 @@ export default function AgentFrame(props: AgentFrameProps) {
           ? props.config.readOnly
             ? 'Auto-approve is unavailable in Read Only mode.'
             : accessRestrictionReason()
-          : undefined
+          : autoApproveBusyReason
       }
       persistenceWarning={conversationPersistenceError}
       composerDisabled={
